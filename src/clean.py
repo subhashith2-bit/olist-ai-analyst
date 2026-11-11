@@ -96,10 +96,11 @@ print("\nCleaning complete:\n")
 
 for table in tables:
     count = con.sql(f"""
-    SELECT COUNT(*)
-    FROM {table}
-""").fetchall()[0][0]
+        SELECT COUNT(*)
+        FROM {table}
+    """).fetchall()[0][0]
 
     print(f"{table}: {count:,} rows")
 
-    con.close()
+# Close connection only after all tables are processed
+con.close()
