@@ -747,7 +747,7 @@ def main():
         severity="ERROR"
     ))
 
-    # Check 53: Late delivery rate baseline (8.11%)
+    # Check 53: Late delivery rate baseline (6.77%)
     results.append(run_check(
         con,
         "Late delivery rate baseline mismatch",
@@ -756,7 +756,7 @@ def main():
             WHEN ROUND(
                 COUNT(*) FILTER (WHERE is_late = TRUE) * 100.0
                 / NULLIF(COUNT(is_late), 0), 2
-            ) = 8.11
+            ) = 6.77
             THEN 0
             ELSE 1
         END

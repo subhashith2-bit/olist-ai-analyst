@@ -63,9 +63,9 @@ def main():
             r.review_score,
 
             CASE
-                WHEN o.order_status = 'canceled' THEN 0
-                ELSE COALESCE(i.items_value, 0)
-                     + COALESCE(i.freight_value, 0)
+                WHEN o.order_status = 'delivered'
+                THEN COALESCE(i.items_value, 0) + COALESCE(i.freight_value, 0)
+            ELSE 0
             END AS gmv,
 
             DATE_DIFF(
@@ -74,19 +74,25 @@ def main():
                 o.order_delivered_customer_date
             ) AS delivery_days,
 
-            DATE_DIFF(
-                'day',
-                o.order_estimated_delivery_date,
-                o.order_delivered_customer_date
-            ) AS delay_days,
+            CASE
+                WHEN o.order_status = 'delivered'
+                AND o.order_delivered_customer_date IS NOT NULL
+                AND o.order_estimated_delivery_date IS NOT NULL
+                THEN DATE_DIFF(
+                        'day',
+                     CAST(o.order_estimated_delivery_date AS DATE),
+                    CAST(o.order_delivered_customer_date AS DATE)
+                    )
+             ELSE NULL
+                END AS delay_days,
 
             CASE
                 WHEN o.order_status = 'delivered'
-                 AND o.order_delivered_customer_date IS NOT NULL
-                 AND o.order_estimated_delivery_date IS NOT NULL
-                THEN o.order_delivered_customer_date
-                     > o.order_estimated_delivery_date
-                ELSE NULL
+                AND o.order_delivered_customer_date IS NOT NULL
+                AND o.order_estimated_delivery_date IS NOT NULL
+                THEN CAST(o.order_delivered_customer_date AS DATE)
+                > CAST(o.order_estimated_delivery_date AS DATE)
+            ELSE NULL
             END AS is_late,
 
             o.order_status = 'delivered' AS is_delivered
@@ -112,6 +118,7 @@ def main():
                 f.order_id,
                 c.customer_unique_id,
                 c.customer_state,
+                f.order_status,
                 f.order_purchase_timestamp,
                 f.gmv
             FROM fact_orders f
@@ -120,12 +127,23 @@ def main():
         ),
 
         customer_summary AS (
-            SELECT
-                customer_unique_id,
-                MIN(order_purchase_timestamp) AS first_order_date,
-                MAX(order_purchase_timestamp) AS last_order_date,
-                COUNT(*) AS order_count,
-                SUM(gmv) AS lifetime_gmv
+        SELECT
+            customer_unique_id,
+            MIN(order_purchase_timestamp) AS first_order_date,
+            MAX(order_purchase_timestamp) AS last_order_date,
+
+            COUNT(*) AS order_count,
+
+            COUNT(*) FILTER (
+            WHERE order_status <> 'canceled'
+            ) AS non_canceled_order_count,
+
+            COUNT(*) FILTER (
+            WHERE order_status = 'delivered'
+            ) AS delivered_order_count,
+
+            SUM(gmv) AS lifetime_gmv
+
             FROM customer_orders
             GROUP BY customer_unique_id
         ),
@@ -164,9 +182,15 @@ def main():
             s.first_order_date,
             s.last_order_date,
             s.order_count,
+            s.non_canceled_order_count,
+            s.delivered_order_count,
             s.lifetime_gmv,
-            s.lifetime_gmv / NULLIF(s.order_count, 0) AS aov,
+
+            s.lifetime_gmv / NULLIF(s.delivered_order_count, 0) AS aov,
+
             s.order_count > 1 AS is_repeat,
+
+            s.non_canceled_order_count > 1 AS is_repeat_non_canceled,
 
             DATE_DIFF(
                 'day',
@@ -274,7 +298,9 @@ def main():
 
                 SUM(f.gmv) AS gmv,
 
-                SUM(f.gmv) / NULLIF(COUNT(*), 0) AS aov,
+                SUM(f.gmv) / NULLIF(
+                    COUNT(*) FILTER (WHERE f.is_delivered), 0
+                ) AS aov,
 
                 COUNT(DISTINCT m.customer_unique_id) FILTER (
                     WHERE DATE_TRUNC(

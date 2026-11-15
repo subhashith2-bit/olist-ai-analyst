@@ -5,18 +5,32 @@
 
 This document defines the business metrics used in the Olist AI Analyst Copilot project.
 
-It explains how each metric is calculated, its business meaning, the source tables, and any assumptions or limitations.
+It explains how each metric is calculated, its business meaning, source tables, assumptions, and limitations.
 
 The goal is to ensure that analytics results are consistent, reproducible, and interpretable.
+
+All financial and operational metrics should follow the definitions documented here. This document acts as the project's metric dictionary and single source of truth.
 
 ## 2. Analytics Tables
 
 | Table | Grain | Purpose |
 |---|---|---|
-| fact_orders | One row per order | Central order-level analytical table |
-| customer_metrics | One row per unique customer | Customer purchase behaviour and lifetime value |
-| category_metrics | One row per product category | Product category performance |
-| monthly_kpis | One row per calendar month | Monthly business performance |
+| `fact_orders` | One row per order | Central order-level analytical table |
+| `customer_metrics` | One row per unique customer | Customer purchase behaviour and lifetime value |
+| `category_metrics` | One row per product category | Product category performance |
+| `monthly_kpis` | One row per calendar month | Monthly business performance |
+
+### 2.1 Analytics Layer Design
+
+The project uses a simplified analytics layer built around one central order-level fact table and three aggregated analytical tables.
+
+- `fact_orders` is the central order-level fact table.
+- `customer_metrics` and `category_metrics` are aggregated analytical tables, not true dimension tables.
+- `monthly_kpis` provides pre-aggregated monthly business metrics.
+
+This design simplifies analytical queries and provides reusable datasets for reporting and analysis.
+
+A full star schema for Power BI could be developed further by introducing `dim_customer`, `dim_product`, and `dim_date`.
 
 ## 3. Currency
 
@@ -28,33 +42,38 @@ The dataset represents Brazilian e-commerce transactions.
 
 ### 4.1 Gross Merchandise Value (GMV)
 
-**Business meaning:** Total value of products and freight associated with orders, excluding canceled orders.
+**Business meaning:** Total value of products and freight associated with successfully delivered orders.
 
 **Formula:**
 
 GMV = Item Price + Freight Value
 
 **Implementation:**
-- Canceled orders have GMV = 0.
-- All other order statuses are included.
-- Orders without items are retained with GMV = 0.
+
+- Only orders with `order_status = 'delivered'` contribute to GMV.
+- Canceled, created, approved, unavailable, and other non-delivered statuses contribute zero.
+- Orders without items are retained with `n_items = 0`, `items_value = 0`, `freight_value = 0`, and GMV = 0.
+- Freight is included in GMV.
+- GMV is calculated at order level.
 
 **Source:** `fact_orders`
 
-**Total GMV:** R$15,737,667.52
+**Total Delivered-Order GMV:** R$15,419,773.75
 
 ### 4.2 Average Order Value (AOV)
 
-**Business meaning:** Average GMV generated per order.
+**Business meaning:** Average GMV generated per delivered order.
 
 **Formula:**
 
-AOV = Total GMV / Total Orders
+AOV = Delivered-Order GMV / Number of Delivered Orders
 
 **Implementation:**
-- At customer level: Lifetime GMV / Customer Order Count.
-- At monthly level: Monthly GMV / Monthly Order Count.
-- All orders are included in the denominator.
+
+- At customer level: Customer Lifetime GMV / Customer Delivered-Order Count.
+- At monthly level: Monthly Delivered-Order GMV / Monthly Delivered-Order Count.
+- Only delivered orders are included in both the numerator and denominator.
+- `NULLIF` is used to prevent division by zero.
 
 **Source:** `customer_metrics`, `monthly_kpis`
 
@@ -67,8 +86,11 @@ AOV = Total GMV / Total Orders
 Item Sales = SUM(Item Price)
 
 **Implementation:**
+
 - Canceled orders are excluded from category sales.
+- Other non-canceled order statuses are included.
 - Freight is reported separately.
+- This is a different measure from delivered-order GMV.
 
 **Source:** `category_metrics`
 
@@ -76,7 +98,7 @@ Item Sales = SUM(Item Price)
 
 ### 4.4 Payment Total
 
-**Business meaning:** Total amount paid by customers across payment records.
+**Business meaning:** Total amount recorded across customer payment records.
 
 **Formula:**
 
@@ -86,7 +108,15 @@ Payment Total = SUM(Payment Value)
 
 **Total Payment Value:** R$16,008,872.12
 
-Note: Payment total and GMV are different measures. Payment records and item-level order values represent different aspects of transactions.
+**Reconciliation:**
+
+- Raw payment total: R$16,008,872.12
+- Clean payment total: R$16,008,872.12
+- Difference: R$0.00
+
+Three zero-value `not_defined` payment records were removed during cleaning. Their removal did not change the payment total.
+
+Note: Payment total, item sales, and GMV are different business measures. They represent different aspects of transactions and should not be expected to match.
 
 ### 4.5 Freight Share
 
@@ -104,7 +134,7 @@ Note: This metric is calculated separately for each product category.
 
 ### 5.1 Total Customers
 
-**Business meaning:** Number of distinct customers identified by customer_unique_id.
+**Business meaning:** Number of distinct customers identified by `customer_unique_id`.
 
 **Formula:**
 
@@ -120,43 +150,70 @@ COUNT(DISTINCT customer_unique_id)
 
 **Formula:**
 
-Repeat Rate = (Customers with 2+ Orders / Total Unique Customers) * 100
+Repeat Rate = (Customers with 2+ Orders / Total Unique Customers) × 100
+
+Two versions are calculated to show the effect of canceled orders.
+
+| Definition | Repeat Rate |
+|---|---:|
+| All orders | 3.12% |
+| Excluding canceled orders | 3.04% |
+| Difference | 0.08 percentage points |
+
+**Implementation:**
+
+- `is_repeat` identifies customers with more than one order, including canceled orders.
+- `is_repeat_non_canceled` identifies customers with more than one non-canceled order.
+- Both rates use the total number of unique customers as the denominator.
+
+The difference is small, but both definitions are retained for transparency.
 
 **Source:** `customer_metrics`
 
-**Repeat Customer Rate:** 3.12%
-
 ### 5.3 Customer Lifetime GMV
 
-**Business meaning:** Total GMV generated by a customer across all their orders.
+**Business meaning:** Total delivered-order GMV generated by a customer across all their orders.
 
 **Formula:**
 
-Lifetime GMV = SUM(Customer Order GMV)
+Lifetime GMV = SUM(Customer Delivered-Order GMV)
+
+**Implementation:**
+
+- Only delivered orders contribute to lifetime GMV.
+- Non-delivered orders contribute zero.
 
 **Source:** `customer_metrics`
 
 ### 5.4 Customer Average Order Value
 
-**Business meaning:** Average GMV generated per order by an individual customer.
+**Business meaning:** Average delivered-order GMV generated by an individual customer.
 
 **Formula:**
 
-Customer AOV = Customer Lifetime GMV / Customer Order Count
+Customer AOV = Customer Lifetime GMV / Customer Delivered-Order Count
+
+**Implementation:**
+
+- Only delivered orders are included in the denominator.
+- Customers with zero delivered orders have a NULL AOV.
 
 **Source:** `customer_metrics`
 
 ### 5.5 Days to Second Order
 
-**Business meaning:** Number of calendar-day boundaries between a customer's first and second purchase timestamps.
+**Business meaning:** Number of calendar-day boundaries between a customer's first and second order timestamps.
 
 **Formula:**
 
 Days to Second Order = Second Order Date - First Order Date
 
 **Implementation:**
+
 - Calculated only for customers with at least two orders.
-- Customers with no second order have NULL.
+- Customers without a second order have NULL.
+- `ROW_NUMBER()` identifies the first and second orders.
+- `order_id` is used as a tie-breaker when purchase timestamps are identical.
 
 **Source:** `customer_metrics`
 
@@ -164,43 +221,74 @@ Days to Second Order = Second Order Date - First Order Date
 
 ### 6.1 Late Delivery Rate
 
-**Business meaning:** Percentage of delivered orders that arrived after their estimated delivery timestamp.
+**Business meaning:** Percentage of delivered orders that arrived after their estimated delivery date.
 
 **Formula:**
 
-Late Rate = (Late Delivered Orders / Delivered Orders with Valid Delivery Dates) * 100
+Late Rate = (Late Delivered Orders / Delivered Orders with Valid Delivery Dates) × 100
 
 **Implementation:**
-- Uses exact timestamp comparison.
-- Only delivered orders with both actual and estimated delivery timestamps are included.
-- Orders with missing delivery timestamps are excluded.
+
+- Uses date-level comparison rather than exact timestamp comparison.
+- Actual and estimated delivery timestamps are cast to DATE before comparison.
+- A delivery is late only when the actual delivery date is later than the estimated delivery date.
+- Same-day deliveries are not late, even if the actual delivery time is later than midnight.
+- Only delivered orders with both actual and estimated delivery dates are included.
+- Orders with missing delivery dates are excluded.
+
+**Validated Results:**
+
+| Measure | Value |
+|---|---:|
+| Delivered orders with valid dates | 96,470 |
+| Late orders | 6,534 |
+| Late delivery rate | 6.77% |
+
+**Previous timestamp-based rate:** 8.11%
+
+The earlier calculation compared full timestamps. Since estimated delivery timestamps are stored at midnight, same-day deliveries could incorrectly be classified as late.
+
+The corrected date-level calculation avoids these false positives.
 
 **Source:** `fact_orders`
 
-**Late Delivery Rate:** 8.11%
-
 ### 6.2 Delivery Days
 
-**Business meaning:** Calendar-day difference between purchase and actual delivery.
+**Business meaning:** Calendar-day difference between purchase date and actual delivery date.
 
 **Formula:**
 
 Delivery Days = Actual Delivery Date - Purchase Date
 
+**Implementation:**
+
+- Calculated for delivered orders with valid delivery timestamps.
+- Uses calendar-day difference rather than exact elapsed hours.
+
 **Source:** `fact_orders`
 
 ### 6.3 Delivery Delay Days
 
-**Business meaning:** Calendar-day difference between estimated and actual delivery.
+**Business meaning:** Calendar-day difference between estimated and actual delivery dates.
 
 **Formula:**
 
 Delay Days = Actual Delivery Date - Estimated Delivery Date
 
 **Implementation:**
-- Positive values indicate delivery after the estimated date.
+
+- Positive values indicate late delivery.
 - Negative values indicate early delivery.
-- Zero indicates delivery on the same calendar date.
+- Zero indicates delivery on the estimated calendar date.
+- Calculated only for delivered orders with valid actual and estimated delivery dates.
+
+**Validation:**
+
+- Late flag count: 6,534
+- Positive delay count: 6,534
+- Mismatches: 0
+
+This confirms that `is_late` and `delay_days > 0` use consistent date-level logic.
 
 **Source:** `fact_orders`
 
@@ -208,107 +296,54 @@ Delay Days = Actual Delivery Date - Estimated Delivery Date
 
 ### 7.1 Monthly Orders
 
-Total number of orders placed during a calendar month.
+Total number of orders placed during a calendar month, including all order statuses.
 
 **Source:** `monthly_kpis`
 
-### 7.2 New Customers
+### 7.2 Monthly Delivered Orders
 
-Number of distinct customers whose first order occurred during that month.
-
-**Source:** `monthly_kpis`
-
-### 7.3 Returning Customer Orders
-
-Number of orders placed in a month by customers whose first order occurred in an earlier month.
+Number of delivered orders placed during a calendar month.
 
 **Source:** `monthly_kpis`
 
-### 7.4 Cancellation Rate
+### 7.3 Monthly GMV
+
+Total delivered-order GMV generated during a calendar month.
 
 **Formula:**
 
-Cancellation Rate = (Canceled Orders / Total Orders) * 100
+Monthly GMV = SUM(Delivered-Order GMV)
 
 **Source:** `monthly_kpis`
 
-### 7.5 Month-over-Month GMV Growth
+### 7.4 Monthly AOV
+
+Average GMV generated per delivered order during a calendar month.
 
 **Formula:**
 
-MoM Growth = ((Current Month GMV - Previous Month GMV) / Previous Month GMV) * 100
+Monthly AOV = Monthly GMV / Monthly Delivered Orders
 
 **Implementation:**
-- Calculated using the previous calendar month's GMV.
-- Returns NULL when previous month GMV is zero.
-- Months without orders are retained with GMV = 0.
+
+Both numerator and denominator use delivered orders only.
 
 **Source:** `monthly_kpis`
 
-### 7.6 Partial Month Flag
+### 7.5 New Customers
 
-Identifies months that contain incomplete dataset coverage.
+Number of distinct customers whose first recorded order occurred during that month.
 
 **Implementation:**
-- September 2016: Partial month.
-- October 2018: Partial month.
 
-**Source:** `monthly_kpis`
+- First order date is determined using the earliest order timestamp.
+- The current implementation considers all order statuses.
+- Therefore, a customer's first canceled order can determine their new-customer month.
 
-## 8. Business Assumptions and Limitations
+**Source:** `monthly_kpis`, `customer_metrics`
 
-### 8.1 Order-Level Assumptions
+### 7.6 Returning Customer Orders
 
-- Each row in `fact_orders` represents one order.
-- Orders without matching order items are retained.
-- Orders without items have n_items = 0 and GMV = 0.
-- Canceled orders have GMV = 0.
-- All other order statuses are included in GMV.
+Number of orders placed in a month by customers whose first recorded order occurred in an earlier month.
 
-### 8.2 Customer Identification
-
-- `customer_id` identifies a customer record associated with an order.
-- `customer_unique_id` identifies the actual customer across multiple orders.
-- Repeat customer calculations use `customer_unique_id`.
-
-### 8.3 Multiple Records Per Order
-
-- Order items, payments, and reviews can contain multiple records per order.
-- These tables are aggregated separately before joining to prevent duplicate counting.
-- Multiple review scores for an order are averaged.
-
-### 8.4 Category Metrics Limitations
-
-- Category sales exclude canceled orders.
-- Review scores and late-delivery indicators are order-level metrics.
-- When attached to individual items, they produce item-weighted approximations rather than order-weighted category averages.
-
-### 8.5 Delivery Data Limitations
-
-- Eight delivered orders have missing actual delivery timestamps.
-- These orders are excluded from late-delivery rate calculations.
-- Late delivery is determined using exact timestamp comparison.
-- Delivery duration and delay days use calendar-day differences.
-
-### 8.6 Payment Limitations
-
-- Payment total and GMV are different measures.
-- The dataset does not provide platform commission or take-rate information.
-- Therefore, actual platform revenue cannot be calculated from this dataset.
-
-### 8.7 Dataset Coverage
-
-- September 2016 and October 2018 are partial months.
-- Monthly growth is NULL when the previous month's GMV is zero.
-- November 2016 has no orders but is retained in the monthly calendar.
-
-### 8.8 Known Data Quality Warnings
-
-The data-quality pipeline identifies:
-
-| Warning | Affected rows |
-|---|---:|
-| Carrier handoff before purchase | 166 |
-| Delivered orders missing actual delivery date | 8 |
-
-These records are retained rather than silently removed.
+**
