@@ -567,6 +567,205 @@ def main():
         severity="ERROR"
     ))
 
+    # Check 42: Duplicate order IDs in fact_orders
+    results.append(run_check(
+        con,
+        "Fact orders duplicate order_id",
+        """
+        SELECT COUNT(*)
+        FROM (
+            SELECT order_id
+            FROM fact_orders
+            GROUP BY order_id
+            HAVING COUNT(*) > 1
+        )
+        """,
+        severity="ERROR"
+    ))
+
+    # Check 43: Fact orders row count reconciliation
+    results.append(run_check(
+        con,
+        "Fact orders row count mismatch",
+        """
+        SELECT ABS(
+            (SELECT COUNT(*) FROM clean_orders) -
+            (SELECT COUNT(*) FROM fact_orders)
+        )
+        """,
+        severity="ERROR"
+    ))
+
+    # Check 44: Duplicate customer IDs
+    results.append(run_check(
+        con,
+        "Customer metrics duplicate customer",
+        """
+        SELECT COUNT(*)
+        FROM (
+            SELECT customer_unique_id
+            FROM customer_metrics
+            GROUP BY customer_unique_id
+            HAVING COUNT(*) > 1
+        )
+        """,
+        severity="ERROR"
+    ))
+
+    # Check 45: Customer count reconciliation
+    results.append(run_check(
+        con,
+        "Customer metrics row count mismatch",
+        """
+        SELECT ABS(
+            (SELECT COUNT(DISTINCT customer_unique_id)
+             FROM clean_customers) -
+            (SELECT COUNT(*) FROM customer_metrics)
+        )
+        """,
+        severity="ERROR"
+    ))
+        # Check 46: Duplicate categories in category_metrics
+    results.append(run_check(
+        con,
+        "Category metrics duplicate categories",
+        """
+        SELECT COUNT(*)
+        FROM (
+            SELECT product_category_name
+            FROM category_metrics
+            GROUP BY product_category_name
+            HAVING COUNT(*) > 1
+        ) AS duplicates
+        """,
+        severity="ERROR"
+    ))
+
+    # Check 47: Duplicate months in monthly_kpis
+    results.append(run_check(
+        con,
+        "Monthly KPIs duplicate months",
+        """
+        SELECT COUNT(*)
+        FROM (
+            SELECT month
+            FROM monthly_kpis
+            GROUP BY month
+            HAVING COUNT(*) > 1
+        ) AS duplicates
+        """,
+        severity="ERROR"
+    ))
+        # Check 48: Monthly KPI table should contain 26 months
+    results.append(run_check(
+        con,
+        "Monthly KPIs expected month count mismatch",
+        """
+        SELECT ABS(COUNT(*) - 26)
+        FROM monthly_kpis
+        """,
+        severity="ERROR"
+    ))
+
+    # Check 49: GMV reconciliation across analytics tables
+    results.append(run_check(
+        con,
+        "Analytics GMV reconciliation mismatch",
+        """
+        SELECT CASE
+            WHEN
+                ABS(
+                    (SELECT SUM(gmv) FROM fact_orders) -
+                    (SELECT SUM(lifetime_gmv) FROM customer_metrics)
+                ) < 0.01
+                AND
+                ABS(
+                    (SELECT SUM(gmv) FROM fact_orders) -
+                    (SELECT SUM(gmv) FROM monthly_kpis)
+                ) < 0.01
+            THEN 0
+            ELSE 1
+        END
+        """,
+        severity="ERROR"
+    ))
+
+    # Check 50: Fact order item value reconciliation
+    results.append(run_check(
+        con,
+        "Fact orders item value reconciliation mismatch",
+        """
+        SELECT CASE
+            WHEN ABS(
+                (SELECT SUM(items_value) FROM fact_orders) -
+                (SELECT SUM(price) FROM clean_order_items)
+            ) < 0.01
+            THEN 0
+            ELSE 1
+        END
+        """,
+        severity="ERROR"
+    ))
+        # Check 51: Category item count reconciliation
+    results.append(run_check(
+        con,
+        "Category metrics item count mismatch",
+        """
+        SELECT CASE
+            WHEN
+                (SELECT SUM(items_sold) FROM category_metrics)
+                =
+                (
+                    SELECT COUNT(*)
+                    FROM clean_order_items i
+                    JOIN clean_orders o
+                        ON i.order_id = o.order_id
+                    WHERE o.order_status <> 'canceled'
+                )
+            THEN 0
+            ELSE 1
+        END
+        """,
+        severity="ERROR"
+    ))
+
+    # Check 52: Repeat customer rate baseline (3.12%)
+    results.append(run_check(
+        con,
+        "Repeat customer rate baseline mismatch",
+        """
+        SELECT CASE
+            WHEN ROUND(
+                COUNT(*) FILTER (WHERE is_repeat) * 100.0
+                / COUNT(*), 2
+            ) = 3.12
+            THEN 0
+            ELSE 1
+        END
+        FROM customer_metrics
+        """,
+        severity="ERROR"
+    ))
+
+    # Check 53: Late delivery rate baseline (8.11%)
+    results.append(run_check(
+        con,
+        "Late delivery rate baseline mismatch",
+        """
+        SELECT CASE
+            WHEN ROUND(
+                COUNT(*) FILTER (WHERE is_late = TRUE) * 100.0
+                / NULLIF(COUNT(is_late), 0), 2
+            ) = 8.11
+            THEN 0
+            ELSE 1
+        END
+        FROM fact_orders
+        """,
+        severity="ERROR"
+    ))
+
+
         # Save quality-check results in DuckDB
     results_df = pd.DataFrame(results)
 
