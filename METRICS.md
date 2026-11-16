@@ -77,6 +77,7 @@ AOV = Delivered-Order GMV / Number of Delivered Orders
 
 **Source:** `customer_metrics`, `monthly_kpis`
 
+
 ### 4.3 Item Sales
 
 **Business meaning:** Total value of products sold, excluding freight.
@@ -87,14 +88,22 @@ Item Sales = SUM(Item Price)
 
 **Implementation:**
 
-- Canceled orders are excluded from category sales.
-- Other non-canceled order statuses are included.
+- Only delivered orders are included in category sales.
 - Freight is reported separately.
 - This is a different measure from delivered-order GMV.
 
 **Source:** `category_metrics`
 
-**Total Category Sales:** R$13,496,408.43
+**Total Delivered Category Sales:** R$13,221,498.11
+
+**Reconciliation with Delivered-Order GMV:**
+
+| Measure | Amount |
+|---|---:|
+| Delivered item sales | R$13,221,498.11 |
+| Delivered freight | R$2,198,275.64 |
+| Delivered GMV | R$15,419,773.75 |
+
 
 ### 4.4 Payment Total
 
@@ -346,4 +355,59 @@ Number of distinct customers whose first recorded order occurred during that mon
 
 Number of orders placed in a month by customers whose first recorded order occurred in an earlier month.
 
+### 7.7 Low-Volume Month Flag
+
+**Business meaning:** Identifies months with fewer than 100 total orders.
+
+**Implementation:**
+- `low_volume = TRUE` when monthly total orders are below 100.
+- `low_volume = FALSE` when monthly total orders are 100 or more.
+- Counts all order statuses, not only delivered orders.
+- Months with low order volumes should be interpreted cautiously when analysing month-over-month growth.
+
+**Source:** `monthly_kpis`
+
+**Validated low-volume months:**
+
+| Month | Orders |
+|---|---:|
+| September 2016 | 4 |
+| November 2016 | 0 |
+| December 2016 | 1 |
+| September 2018 | 16 |
+| October 2018 | 4 |
+
 **
+## 8. Payment vs GMV Reconciliation
+
+Payment totals and GMV are maintained as separate business measures.
+
+- Overall clean payment total: **R$16,008,872.12**
+- Delivered-order payment total: **R$15,422,461.77**
+- Delivered-order GMV: **R$15,419,773.75**
+- Net difference: **R$2,688.02**
+- Delivered orders with differences of at least R$0.01: **382**
+- Of these, 381 have payment records and 1 has no payment record in the raw dataset.
+
+Credit-card transactions account for most mismatches. All 23 mismatches involving 11 or more installments are credit-card transactions with payment totals higher than GMV. This pattern is consistent with possible installment-related charges, but the dataset does not provide an interest breakdown, so the cause cannot be confirmed.
+
+Payment totals are therefore not expected to reconcile exactly with GMV. Both measures are retained independently, and mismatched orders are not removed or adjusted.
+
+### 8.1 Data Quality Validation Summary
+
+The analytics layer is validated through automated data quality checks.
+
+| Validation Result | Count |
+|---|---:|
+| Total checks | 57 |
+| Passed | 55 |
+| Warnings | 2 |
+| Failed | 0 |
+
+**Interpretation:**
+
+- All critical validation checks passed.
+- Two warnings remain for known data anomalies.
+- No failed checks were reported.
+
+The warnings are documented and retained for transparency rather than silently modifying source data.

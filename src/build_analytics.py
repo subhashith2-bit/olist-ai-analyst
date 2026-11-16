@@ -257,7 +257,7 @@ def main():
             COUNT(DISTINCT seller_id) AS number_of_sellers
 
         FROM category_items_enriched
-        WHERE order_status <> 'canceled'
+        WHERE order_status = 'delivered'
         GROUP BY product_category_name
     """)
 
@@ -340,29 +340,29 @@ def main():
         ),
 
         monthly_with_previous AS (
-            SELECT
-                c.month,
-                COALESCE(a.orders, 0) AS orders,
-                COALESCE(a.delivered_orders, 0) AS delivered_orders,
-                COALESCE(a.gmv, 0) AS gmv,
-                COALESCE(a.aov, 0) AS aov,
-                COALESCE(a.new_customers, 0) AS new_customers,
-                COALESCE(a.returning_customer_orders, 0)
-                    AS returning_customer_orders,
-                COALESCE(a.cancellation_rate, 0) AS cancellation_rate,
-                COALESCE(a.late_rate, 0) AS late_rate,
-                COALESCE(a.average_review_score, 0)
-                    AS average_review_score,
+        SELECT
+        c.month,
+        COALESCE(a.orders, 0) AS orders,
+        COALESCE(a.orders, 0) < 100 AS low_volume,
+        COALESCE(a.delivered_orders, 0) AS delivered_orders,
+        COALESCE(a.gmv, 0) AS gmv,
+        COALESCE(a.aov, 0) AS aov,
+        COALESCE(a.new_customers, 0) AS new_customers,
+        COALESCE(a.returning_customer_orders, 0)
+            AS returning_customer_orders,
+        COALESCE(a.cancellation_rate, 0) AS cancellation_rate,
+        COALESCE(a.late_rate, 0) AS late_rate,
+        COALESCE(a.average_review_score, 0)
+            AS average_review_score,
 
-                LAG(COALESCE(a.gmv, 0)) OVER (
-                    ORDER BY c.month
-                ) AS previous_month_gmv
+        LAG(COALESCE(a.gmv, 0)) OVER (
+            ORDER BY c.month
+        ) AS previous_month_gmv
 
-            FROM month_calendar c
-            LEFT JOIN monthly_aggregates a
-                ON c.month = a.month
+        FROM month_calendar c
+        LEFT JOIN monthly_aggregates a
+        ON c.month = a.month
         )
-
         SELECT
             *,
             (

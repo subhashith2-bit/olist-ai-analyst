@@ -707,23 +707,24 @@ def main():
         severity="ERROR"
     ))
         # Check 51: Category item count reconciliation
+    # Check 51: Category item count reconciliation (delivered orders)
     results.append(run_check(
-        con,
-        "Category metrics item count mismatch",
-        """
-        SELECT CASE
-            WHEN
-                (SELECT SUM(items_sold) FROM category_metrics)
-                =
-                (
-                    SELECT COUNT(*)
-                    FROM clean_order_items i
-                    JOIN clean_orders o
-                        ON i.order_id = o.order_id
-                    WHERE o.order_status <> 'canceled'
-                )
-            THEN 0
-            ELSE 1
+    con,
+    "Category metrics item count mismatch",
+    """
+    SELECT CASE
+        WHEN
+            (SELECT SUM(items_sold) FROM category_metrics)
+            =
+            (
+                SELECT COUNT(*)
+                FROM clean_order_items i
+                JOIN clean_orders o
+                    ON i.order_id = o.order_id
+                WHERE o.order_status = 'delivered'
+            )
+        THEN 0
+        ELSE 1
         END
         """,
         severity="ERROR"
@@ -765,7 +766,89 @@ def main():
         severity="ERROR"
     ))
 
-
+    # Check 54: Category item sales reconciliation
+    results.append(run_check(
+    con,
+    "Category item sales reconciliation mismatch",
+    """
+    SELECT CASE
+        WHEN ABS(
+            ROUND((SELECT SUM(sales) FROM category_metrics), 2)
+            -
+            ROUND(
+                (SELECT SUM(items_value)
+                 FROM fact_orders
+                 WHERE is_delivered), 2
+            )
+        ) < 0.01
+        THEN 0
+        ELSE 1
+        END
+        """,
+        severity="ERROR"
+    ))
+    # Check 55: Category sales plus freight reconciliation
+    results.append(run_check(
+    con,
+    "Category sales plus freight GMV mismatch",
+    """
+    SELECT CASE
+        WHEN ABS(
+            ROUND(
+                (SELECT SUM(sales) FROM category_metrics)
+                +
+                (SELECT SUM(freight_value)
+                 FROM fact_orders
+                 WHERE is_delivered),
+                2
+            )
+            -
+            ROUND(
+                (SELECT SUM(gmv)
+                 FROM fact_orders), 2
+            )
+        ) < 0.01
+        THEN 0
+        ELSE 1
+        END
+        """,
+        severity="ERROR"
+    ))
+    # Check 56: Late flag consistency
+    results.append(run_check(
+    con,
+    "Late flag and delay days mismatch",
+    """
+    SELECT COUNT(*)
+    FROM fact_orders
+    WHERE is_delivered
+      AND delay_days IS NOT NULL
+      AND (
+          is_late IS DISTINCT FROM (delay_days > 0)
+        )
+        """,
+        severity="ERROR"
+    ))
+        # Check 57: Customer AOV NULL handling
+    results.append(run_check(
+    con,
+    "Customer AOV zero-delivery handling mismatch",
+    """
+    SELECT COUNT(*)
+    FROM customer_metrics
+    WHERE
+        (
+            delivered_order_count = 0
+            AND aov IS NOT NULL
+        )
+        OR
+        (
+            delivered_order_count > 0
+            AND aov IS NULL
+        )
+        """,
+        severity="ERROR"
+    ))
         # Save quality-check results in DuckDB
     results_df = pd.DataFrame(results)
 
