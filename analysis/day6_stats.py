@@ -141,11 +141,44 @@ print("Rank-biserial correlation:", round(rank_biserial, 4))
 
 chart_data = review_summary["low_rating_pct"]
 
+# Calculate Wilson 95% confidence intervals
+low_rating_counts = (
+    review_df.assign(low_review=(review_df["review_score"] <= 2))
+    .groupby("is_late")["low_review"]
+    .sum()
+)
+
+ci_lower = []
+ci_upper = []
+
+for group_key in [False, True]:
+    count = int(low_rating_counts.loc[group_key])
+    n = int(review_summary.loc[group_key, "count"])
+
+    lower, upper = proportion_confint(
+        count, n, method="wilson"
+    )
+
+    ci_lower.append(lower * 100)
+    ci_upper.append(upper * 100)
+
+values = [
+    chart_data.loc[False],
+    chart_data.loc[True]
+]
+
+yerr = [
+    [v - lo for v, lo in zip(values, ci_lower)],
+    [hi - v for v, hi in zip(values, ci_upper)]
+]
+
 plt.figure(figsize=(8, 5))
 
 bars = plt.bar(
     ["On-time / Early", "Late"],
-    [chart_data.loc[False], chart_data.loc[True]]
+    values,
+    yerr=yerr,
+    capsize=6
 )
 
 plt.title("Low Review Ratings by Delivery Status")
@@ -153,13 +186,13 @@ plt.ylabel("Orders with 1–2 Star Reviews (%)")
 plt.xlabel("Delivery Status")
 plt.ylim(0, 75)
 
-# Add percentage labels
 for bar, group_key in zip(bars, [False, True]):
     height = bar.get_height()
     sample_n = int(review_summary.loc[group_key, "count"])
+
     plt.text(
         bar.get_x() + bar.get_width() / 2,
-        height + 1,
+        height + 2,
         f"{height:.1f}%\n(n={sample_n:,})",
         ha="center"
     )
@@ -684,27 +717,55 @@ gmv_plot = gmv_summary.reindex(
     ["Low GMV", "Medium GMV", "High GMV"]
 )
 
+# Calculate Wilson 95% confidence intervals
+ci_lower = []
+ci_upper = []
+
+for group_name in gmv_plot.index:
+    repeats = int(gmv_plot.loc[group_name, "sum"])
+    n = int(gmv_plot.loc[group_name, "count"])
+
+    lower, upper = proportion_confint(
+        repeats, n, method="wilson"
+    )
+
+    ci_lower.append(lower * 100)
+    ci_upper.append(upper * 100)
+
+values = gmv_plot["repeat_rate_pct"].tolist()
+
+yerr = [
+    [v - lo for v, lo in zip(values, ci_lower)],
+    [hi - v for v, hi in zip(values, ci_upper)]
+]
+
 plt.figure(figsize=(8, 5))
 
 bars = plt.bar(
     gmv_plot.index,
-    gmv_plot["repeat_rate_pct"]
+    values,
+    yerr=yerr,
+    capsize=6
 )
 
 plt.title("Repeat Purchase Rate by First-Order GMV")
 plt.xlabel("First-Order GMV Group")
 plt.ylabel("Repeat Purchase Rate (%)")
 
-plt.ylim(0, 5)
+plt.ylim(0, 5.4)
 
-for bar, group_name in zip(bars, gmv_plot.index):
+for bar, group_name, upper in zip(
+    bars, gmv_plot.index, ci_upper
+):
     height = bar.get_height()
     sample_n = int(gmv_plot.loc[group_name, "count"])
+
     plt.text(
         bar.get_x() + bar.get_width() / 2,
-        height + 0.08,
+        upper + 0.12,
         f"{height:.2f}%\n(n={sample_n:,})",
-        ha="center"
+        ha="center",
+        va="bottom"
     )
 
 plt.tight_layout()
@@ -924,11 +985,20 @@ upper_error = (
     plot_df["ci_upper_pct"] - plot_df["late_rate_pct"]
 )
 
-plt.figure(figsize=(10, 9))
+# Include delivered-order sample size in state labels
+state_labels = [
+    f"{state} (n={n:,})"
+    for state, n in zip(
+        plot_df["customer_state"],
+        plot_df["delivered_orders"]
+    )
+]
+
+plt.figure(figsize=(11, 10))
 
 plt.errorbar(
     plot_df["late_rate_pct"],
-    plot_df["customer_state"],
+    state_labels,
     xerr=[lower_error, upper_error],
     fmt="o",
     capsize=3
@@ -936,7 +1006,7 @@ plt.errorbar(
 
 plt.title("Late Delivery Rate by State (95% Wilson CI)")
 plt.xlabel("Late Delivery Rate (%)")
-plt.ylabel("Customer State")
+plt.ylabel("Customer State (Delivered Orders)")
 plt.grid(axis="x", alpha=0.3)
 
 plt.tight_layout()
