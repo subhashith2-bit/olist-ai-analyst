@@ -1,5 +1,8 @@
 .venv/
-data/
+data/*
+!data/raw/
+data/raw/*
+!data/raw/README.txt
 *.duckdb
 .env
 __pycache__/
