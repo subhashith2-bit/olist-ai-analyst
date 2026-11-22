@@ -13,7 +13,8 @@ stages = [
     "src/load_raw.py",
     "src/clean.py",
     "src/build_analytics.py",
-    "src/checks.py"
+    "src/checks.py",
+    "src/export_serving_db.py"
 ]
 
 total_start = time.perf_counter()

@@ -1,8 +1,14 @@
-
 import duckdb
-from llm import call_llm
-from sql_guardrails import validate_sql
+from llm import call_llm, MODEL_NAME
+from sql_guardrails import validate_sql, enforce_limit
 import pandas as pd
+from pathlib import Path
+from query_executor import execute_with_timeout
+import time
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+SERVING_DB = PROJECT_ROOT / "olist_serving.duckdb"
+LOG_DB = PROJECT_ROOT / "llm_runs.duckdb"
 
 
 SCHEMA = """
@@ -59,6 +65,7 @@ SQL rules:
 - Label percentage results clearly, preferably with a column name ending in _pct.
 """
 
+
 def clean_sql(sql):
     sql = sql.strip()
 
@@ -66,6 +73,73 @@ def clean_sql(sql):
         sql = sql.replace("```sql", "").replace("```", "").strip()
 
     return sql
+
+
+def log_run(
+    question,
+    model,
+    generated_sql,
+    validation_status,
+    validation_message,
+    final_sql,
+    execution_status,
+    error_message,
+    llm_seconds,
+    sql_seconds,
+    rows_returned
+):
+    log_con = duckdb.connect(str(LOG_DB))
+
+    try:
+        log_con.execute("""
+            CREATE TABLE IF NOT EXISTS llm_runs (
+                run_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                question VARCHAR,
+                model VARCHAR,
+                generated_sql VARCHAR,
+                validation_status VARCHAR,
+                validation_message VARCHAR,
+                final_sql VARCHAR,
+                execution_status VARCHAR,
+                error_message VARCHAR,
+                llm_seconds DOUBLE,
+                sql_seconds DOUBLE,
+                rows_returned INTEGER
+            )
+        """)
+
+        log_con.execute("""
+            INSERT INTO llm_runs (
+                question,
+                model,
+                generated_sql,
+                validation_status,
+                validation_message,
+                final_sql,
+                execution_status,
+                error_message,
+                llm_seconds,
+                sql_seconds,
+                rows_returned
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [
+            question,
+            model,
+            generated_sql,
+            validation_status,
+            validation_message,
+            final_sql,
+            execution_status,
+            error_message,
+            llm_seconds,
+            sql_seconds,
+            rows_returned
+        ])
+
+    finally:
+        log_con.close()
+
 
 def main():
     question = input("Ask a business question: ")
@@ -79,29 +153,87 @@ Business question:
 Generate SQL to answer this question.
 """
 
+    generated_sql = None
+    final_sql = None
+    validation_status = "NOT_CHECKED"
+    validation_message = None
+    execution_status = "NOT_EXECUTED"
+    error_message = None
+    llm_seconds = None
+    sql_seconds = None
+    rows_returned = None
+
+    # LLM generation
+    llm_start = time.perf_counter()
+
     try:
-        sql = clean_sql(call_llm(prompt))
+        generated_sql = clean_sql(call_llm(prompt))
+        llm_seconds = round(time.perf_counter() - llm_start, 3)
+
     except Exception as e:
+        llm_seconds = round(time.perf_counter() - llm_start, 3)
+        error_message = str(e)
+        execution_status = "LLM_FAILED"
+
         print(f"\nGemini API error: {e}")
-        print("Please try again later.")
+
+        log_run(
+            question, MODEL_NAME, generated_sql,
+            validation_status, validation_message,
+            final_sql, execution_status, error_message,
+            llm_seconds, sql_seconds, rows_returned
+        )
         return
 
     print("\n===== GENERATED SQL =====")
-    print(sql)
+    print(generated_sql)
 
-    is_valid, message = validate_sql(sql)
+    # Validation
+    is_valid, validation_message = validate_sql(generated_sql)
+
+    validation_status = "PASSED" if is_valid else "REJECTED"
 
     print("\n===== VALIDATION =====")
-    print(message)
+    print(validation_message)
 
     if not is_valid:
+        execution_status = "REJECTED"
+
         print("Query rejected. It will not be executed.")
+
+        log_run(
+            question, MODEL_NAME, generated_sql,
+            validation_status, validation_message,
+            final_sql, execution_status, error_message,
+            llm_seconds, sql_seconds, rows_returned
+        )
         return
 
-    con = duckdb.connect("olist.duckdb", read_only=True)
+    # Enforce result limit
+    final_sql = enforce_limit(generated_sql)
+
+    print("\n===== FINAL SQL (LIMIT ENFORCED) =====")
+    print(final_sql)
+
+    # Execute against isolated serving database
+    con = duckdb.connect(
+        str(SERVING_DB),
+        read_only=True,
+        config={"enable_external_access": "false"}
+    )
+
+    sql_start = time.perf_counter()
 
     try:
-        result = con.sql(sql).df()
+        result = execute_with_timeout(
+            con,
+            final_sql,
+            timeout_seconds=5
+        )
+
+        sql_seconds = round(time.perf_counter() - sql_start, 3)
+        rows_returned = len(result)
+        execution_status = "SUCCESS"
 
         print("\n===== RESULT =====")
 
@@ -109,10 +241,29 @@ Generate SQL to answer this question.
         print(result.to_string(index=False))
 
     except Exception as e:
-        print(f"\nQuery execution failed: {e}")
+        sql_seconds = round(time.perf_counter() - sql_start, 3)
+        error_message = str(e)
+        execution_status = "SQL_FAILED"
+
+        print(f"\nQuery execution failed or timed out: {e}")
 
     finally:
         con.close()
+
+    # Log the completed run
+    log_run(
+        question, MODEL_NAME, generated_sql,
+        validation_status, validation_message,
+        final_sql, execution_status, error_message,
+        llm_seconds, sql_seconds, rows_returned
+    )
+
+    print("\n===== RUN TIMING =====")
+    print(f"LLM time: {llm_seconds} seconds")
+    print(f"SQL time: {sql_seconds} seconds")
+    print(f"Execution status: {execution_status}")
+
+    print("\nRun recorded in llm_runs.duckdb")
 
 
 if __name__ == "__main__":
