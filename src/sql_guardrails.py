@@ -58,10 +58,24 @@ def validate_sql(query):
     # 5. Inspect table references
     tables = list(tree.find_all(exp.Table))
 
-    # 6. Reject CROSS JOINs
+    
+# 6. Reject CROSS JOINs and unsafe join conditions
     for join in tree.find_all(exp.Join):
+
         if join.args.get("kind", "").upper() == "CROSS":
             return False, "CROSS JOINs are not allowed."
+
+        on_condition = join.args.get("on")
+        using_condition = join.args.get("using")
+
+    # Reject comma joins and joins without explicit conditions
+        if on_condition is None and not using_condition:
+            return False, "JOINs must have an ON or USING condition."
+
+    # Reject constant conditions such as ON 1=1 or ON TRUE
+        if on_condition is not None:
+            if not list(on_condition.find_all(exp.Column)):
+                return False, "JOIN conditions must reference columns."
 
     if not tables:
         return False, "No table detected in query."

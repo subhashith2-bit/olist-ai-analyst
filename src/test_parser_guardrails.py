@@ -22,6 +22,7 @@ allowed_queries = [
     UNION
     SELECT order_id FROM fact_orders
     """,
+    "SELECT a.order_id FROM fact_orders a JOIN fact_orders b ON a.order_id = b.order_id LIMIT 10",
 ]
 
 # Unsafe queries that should fail
@@ -39,6 +40,16 @@ blocked_queries = [
     "SELECT COUNT(*) FROM fact_orders CROSS JOIN fact_orders",
     "WITH RECURSIVE counter AS (SELECT 1 UNION ALL SELECT 1 FROM counter) SELECT * FROM counter",
     "SELECT query FROM query_table()",
+
+    # Realistic table-function and environment-access tests
+    "SELECT * FROM query_table('raw_orders')",
+    "SELECT * FROM glob('data/raw/*.csv')",
+    "SELECT getenv('GEMINI_API_KEY')",
+    "SELECT * FROM range(10)",
+    "SELECT COUNT(*) FROM fact_orders a, fact_orders b",
+    "SELECT COUNT(*) FROM fact_orders a JOIN fact_orders b ON 1=1",
+    "SELECT COUNT(*) FROM fact_orders a INNER JOIN fact_orders b ON TRUE",
+
 ]
 
 print("===== ALLOWED QUERY TESTS =====")
