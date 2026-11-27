@@ -1,0 +1,89 @@
+﻿id,type,question,outcome,seconds,model,prompt_version,schema_hash,generated_sql,behavior_response,rows_returned,details
+E01,easy_lookup,How many orders are in the dataset?,CORRECT,2.522,gemini-2.5-flash,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,SELECT COUNT(DISTINCT order_id) FROM fact_orders,,1,values match
+E02,easy_lookup,How many delivered orders are there?,CORRECT,3.448,gemini-2.5-flash,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,SELECT COUNT(order_id) FROM fact_orders WHERE is_delivered = TRUE;,,1,values match
+E03,easy_lookup,What is the total delivered GMV? Report the amount in Brazilian reais.,CORRECT,1.638,gemini-2.5-flash,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,"SELECT SUM(gmv)
+FROM fact_orders
+WHERE is_delivered = TRUE;",,1,values match
+E04,easy_lookup,What was the delivered GMV in January 2018? Report the amount in Brazilian reais.,CORRECT,1.873,gemini-2.5-flash,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,"SELECT gmv
+FROM monthly_kpis
+WHERE EXTRACT(YEAR FROM month) = 2018
+  AND EXTRACT(MONTH FROM month) = 1;",,1,values match
+M01,medium,Which ten customer states had the highest number of delivered orders? Break ties alphabetically by state.,CORRECT,2.128,gemini-2.5-flash,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,"SELECT
+  customer_state,
+  COUNT(order_id) AS delivered_order_count
+FROM fact_orders
+WHERE
+  is_delivered = TRUE
+GROUP BY
+  customer_state
+ORDER BY
+  delivered_order_count DESC,
+  customer_state ASC
+LIMIT 10;",,10,values match
+M02,medium,What were the ten product categories with the highest freight share? Break ties alphabetically by category name.,CORRECT,2.87,gemini-2.5-flash,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,"SELECT
+  product_category_name,
+  freight_share
+FROM category_metrics
+ORDER BY
+  freight_share DESC,
+  product_category_name ASC
+LIMIT 10;",,10,values match
+M03,medium,"For each payment type, how many orders used it? Sort from highest count to lowest, then alphabetically.",CORRECT,3.222,gemini-3.5-flash-lite,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,"SELECT main_payment_type, COUNT(order_id) AS order_count
+FROM fact_orders
+GROUP BY main_payment_type
+ORDER BY order_count DESC, main_payment_type ASC;",,5,values match
+M05,medium,Which ten customers had the highest lifetime GMV? Break ties by customer_unique_id.,CORRECT,2.611,gemini-2.5-flash,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,"SELECT
+  customer_unique_id,
+  lifetime_gmv
+FROM customer_metrics
+ORDER BY
+  lifetime_gmv DESC,
+  customer_unique_id ASC
+LIMIT 10;",,10,values match
+D01,definition_based,What percentage of customers are repeat customers? State the customer population and repeat-customer definition used. Round the percentage to 2 decimal places.,CORRECT,2.966,gemini-3.5-flash-lite,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,"SELECT 
+    COUNT(CASE WHEN is_repeat = TRUE THEN 1 END) AS repeat_customer_count,
+    COUNT(*) AS total_customer_count,
+    ROUND(AVG(CASE WHEN is_repeat = TRUE THEN 1.0 ELSE 0.0 END) * 100, 2) AS repeat_customer_pct
+FROM customer_metrics",,1,values match
+D02,definition_based,What percentage of orders were delivered late? Exclude orders whose late status is unknown from the denominator.,CORRECT,4.203,gemini-3.5-flash-lite,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,"SELECT 
+    ROUND(CAST(SUM(CASE WHEN is_late = TRUE THEN 1 ELSE 0 END) AS DOUBLE) / COUNT(order_id) * 100, 2) AS late_order_pct
+FROM fact_orders
+WHERE is_late IS NOT NULL;",,1,values match
+D03,definition_based,What is the average order value (AOV) for delivered orders? State the numerator and denominator used.,CORRECT,3.173,gemini-3.5-flash-lite,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,"SELECT 
+    SUM(CASE WHEN is_delivered = TRUE THEN gmv ELSE 0 END) AS numerator_delivered_gmv,
+    COUNT(CASE WHEN is_delivered = TRUE THEN order_id END) AS denominator_delivered_orders,
+    SUM(CASE WHEN is_delivered = TRUE THEN gmv ELSE 0 END) / COUNT(CASE WHEN is_delivered = TRUE THEN order_id END) AS aov
+FROM fact_orders",,1,values match
+T01,date_logic,"Show monthly delivered GMV for calendar year 2017, with one row per month in chronological order.",CORRECT,2.65,gemini-3.5-flash-lite,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,"SELECT 
+    month,
+    gmv
+FROM monthly_kpis
+WHERE EXTRACT(YEAR FROM month) = 2017
+ORDER BY month ASC",,12,values match
+T02,date_logic,Compare delivered GMV by calendar year for 2017 and 2018. Include only the available months in the dataset and label the periods clearly.,CORRECT,4.243,gemini-3.5-flash-lite,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,"SELECT 
+    EXTRACT(YEAR FROM month) AS calendar_year,
+    SUM(gmv) AS total_gmv
+FROM monthly_kpis
+WHERE EXTRACT(YEAR FROM month) IN (2017, 2018)
+GROUP BY EXTRACT(YEAR FROM month)
+ORDER BY calendar_year",,2,values match
+T04,date_logic,Identify the partial calendar months in the dataset and show each month's order count and delivered GMV.,CORRECT,2.719,gemini-3.5-flash-lite,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,"SELECT 
+    month,
+    orders,
+    gmv
+FROM 
+    monthly_kpis
+WHERE 
+    is_partial_month = TRUE",,2,values match
+R01,trap,"How many individual order records are there, and how many distinct people placed those orders? Explain why the two counts can differ.",CORRECT,3.277,gemini-3.5-flash-lite,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,"SELECT 
+    (SELECT COUNT(order_id) FROM fact_orders) AS total_orders,
+    (SELECT COUNT(customer_unique_id) FROM customer_metrics) AS distinct_people",,1,values match
+R03,trap,"How many orders have no matching order-item records, and what is their contribution to delivered GMV?",CORRECT,2.151,gemini-3.5-flash-lite,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,"SELECT
+    COUNT(*) AS orders_without_items,
+    SUM(CASE WHEN is_delivered = TRUE THEN gmv ELSE 0 END) AS delivered_gmv_contribution
+FROM fact_orders
+WHERE n_items = 0",,1,values match
+A01,ambiguous,What was the business's revenue?,MANUAL_REVIEW,2.858,gemini-3.5-flash-lite,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,,,,Grade manually using the question bank's manual_grade_notes.
+A02,ambiguous,Who were the best customers?,MANUAL_REVIEW,2.457,gemini-3.5-flash-lite,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,,,,Grade manually using the question bank's manual_grade_notes.
+O01,out_of_scope,What was the net profit margin for each product category?,MANUAL_REVIEW,1.638,gemini-3.5-flash-lite,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,,,,Grade manually using the question bank's manual_grade_notes.
+O03,out_of_scope,What is the average age of customers in each state?,MANUAL_REVIEW,2.667,gemini-3.5-flash-lite,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,,,,Grade manually using the question bank's manual_grade_notes.

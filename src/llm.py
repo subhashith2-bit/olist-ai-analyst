@@ -14,7 +14,7 @@ MODEL_NAME = "gemini-2.5-flash"
 FALLBACK_MODEL = "gemini-3.5-flash-lite"
 
 MAX_ATTEMPTS = 3
-RETRYABLE_CODES = {429, 500, 502, 503, 504}
+RETRYABLE_SERVER_CODES = {500, 502, 503, 504}
 
 LAST_USED_MODEL = None
 
@@ -29,8 +29,59 @@ client = genai.Client(
 )
 
 
+def classify_429(error):
+    """Classify 429 errors using the available API error message."""
+
+    message = str(error).lower()
+
+    daily_indicators = [
+        "per day",
+        "daily quota",
+        "requests_per_day",
+        "per_day",
+        "daily limit",
+        "daily requests"
+    ]
+
+    minute_indicators = [
+        "per minute",
+        "requests_per_minute",
+        "per_minute",
+        "rpm",
+        "retrydelay",
+        "retry delay",
+        "retry in"
+    ]
+
+    if any(term in message for term in daily_indicators):
+        return "DAILY_QUOTA"
+
+    if any(term in message for term in minute_indicators):
+        return "TEMPORARY_RATE_LIMIT"
+
+    # Unknown 429: don't waste retries guessing.
+    return "UNKNOWN_QUOTA"
+
+
+def call_fallback(prompt):
+    """Call fallback model once."""
+
+    global LAST_USED_MODEL
+
+    print(f"Switching to fallback model: {FALLBACK_MODEL}")
+
+    response = client.models.generate_content(
+        model=FALLBACK_MODEL,
+        contents=prompt
+    )
+
+    LAST_USED_MODEL = FALLBACK_MODEL
+
+    return response.text
+
+
 def call_llm(prompt):
-    """Try the primary model with retries, then use fallback."""
+    """Retry temporary failures and switch to fallback when appropriate."""
 
     global LAST_USED_MODEL
 
@@ -51,33 +102,73 @@ def call_llm(prompt):
 
             status_code = getattr(e, "code", None)
 
-            if status_code not in RETRYABLE_CODES:
-                raise
+            # Handle quota and rate-limit errors separately.
+            if status_code == 429:
 
-            if attempt == MAX_ATTEMPTS:
+                error_type = classify_429(e)
+
+                if error_type == "DAILY_QUOTA":
+                    print(
+                        "Primary model daily quota exhausted. "
+                        "Skipping retries."
+                    )
+                    break
+
+                if error_type == "UNKNOWN_QUOTA":
+                    print(
+                        "Primary model returned an unclassified 429. "
+                        "Skipping retries to avoid wasting quota."
+                    )
+                    break
+
+                # Temporary rate limit: retry with backoff.
+                if attempt == MAX_ATTEMPTS:
+                    print(
+                        "Primary model rate limit persisted after "
+                        f"{MAX_ATTEMPTS} attempts."
+                    )
+                    break
+
+                max_delay = min(8, 2 ** (attempt - 1))
+                delay = random.uniform(0, max_delay)
+
                 print(
-                    f"Primary model failed after {MAX_ATTEMPTS} attempts."
+                    f"Temporary rate limit. "
+                    f"Retrying attempt {attempt + 1}/"
+                    f"{MAX_ATTEMPTS} after {delay:.2f} seconds."
                 )
-                break
 
-            max_delay = min(8, 2 ** (attempt - 1))
-            delay = random.uniform(0, max_delay)
+                time.sleep(delay)
+                continue
 
+            # Retry temporary server errors.
+            if status_code in RETRYABLE_SERVER_CODES:
+
+                if attempt == MAX_ATTEMPTS:
+                    print(
+                        f"Primary model failed after "
+                        f"{MAX_ATTEMPTS} attempts."
+                    )
+                    break
+
+                max_delay = min(8, 2 ** (attempt - 1))
+                delay = random.uniform(0, max_delay)
+
+                print(
+                    f"Primary server error {status_code}. "
+                    f"Retrying attempt {attempt + 1}/"
+                    f"{MAX_ATTEMPTS} after {delay:.2f} seconds."
+                )
+
+                time.sleep(delay)
+                continue
+
+            # Authentication, invalid requests and other errors.
             print(
-                f"Primary model error {status_code}. "
-                f"Retrying attempt {attempt + 1}/{MAX_ATTEMPTS} "
-                f"after {delay:.2f} seconds."
+                f"Non-retryable primary API error: {status_code}"
             )
+            raise
 
-            time.sleep(delay)
-
-    # Primary model exhausted: try fallback once
-    print(f"Switching to fallback model: {FALLBACK_MODEL}")
-
-    response = client.models.generate_content(
-        model=FALLBACK_MODEL,
-        contents=prompt
-    )
-
-    LAST_USED_MODEL = FALLBACK_MODEL
-    return response.text
+    # Primary quota exhausted or temporary failures persisted.
+    # Try fallback once.
+    return call_fallback(prompt)

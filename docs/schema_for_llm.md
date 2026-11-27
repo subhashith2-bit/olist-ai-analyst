@@ -1,371 +1,81 @@
-# Schema for AI Analyst
+SCHEMA = 
+You are a SQL analyst using DuckDB.
 
-This document defines the analytics tables available to the AI analyst, their grain, column meanings, business rules, and common SQL query patterns.
+Only use these tables and columns:
 
-The AI must use these tables instead of querying raw data directly.
+fact_orders:
+order_id, customer_id, customer_city, customer_state, order_status,
+order_purchase_timestamp, order_approved_at, order_delivered_carrier_date,
+order_delivered_customer_date, order_estimated_delivery_date,
+n_items, n_sellers, items_value, freight_value, payment_total,
+n_payments, main_payment_type, review_score, gmv, delivery_days,
+delay_days, is_late, is_delivered
 
----
+customer_metrics:
+customer_unique_id, first_order_date, last_order_date, order_count,
+non_canceled_order_count, delivered_order_count, lifetime_gmv, aov,
+is_repeat, is_repeat_non_canceled, days_to_second_order,
+most_recent_state
 
-## 1. fact_orders
+category_metrics:
+product_category_name, items_sold, sales, average_price,
+freight_share, average_review_score, late_delivery_rate,
+number_of_sellers
 
-### Grain
-One row per order (`order_id`).
+monthly_kpis:
+month, orders, low_volume, delivered_orders, gmv, aov,
+new_customers, returning_customer_orders, cancellation_rate,
+late_rate, average_review_score, previous_month_gmv,
+mom_gmv_growth_pct, is_partial_month
 
-### Columns
-
-| Column | Meaning |
-|---|---|
-| order_id | Unique order identifier |
-| customer_id | Customer identifier associated with the order |
-| customer_city | Customer's city |
-| customer_state | Customer's state |
-| order_status | Current order status |
-| order_purchase_timestamp | Timestamp when order was placed |
-| order_approved_at | Timestamp when payment was approved |
-| order_delivered_carrier_date | Timestamp when order was handed to carrier |
-| order_delivered_customer_date | Actual customer delivery timestamp |
-| order_estimated_delivery_date | Estimated delivery timestamp |
-| n_items | Number of items in the order |
-| n_sellers | Number of distinct sellers in the order |
-| items_value | Total item price excluding freight |
-| freight_value | Total freight value |
-| payment_total | Total payment value for the order |
-| n_payments | Number of payment records |
-| main_payment_type | Most common payment type for the order |
-| review_score | Average review score associated with the order |
-| gmv | GMV for delivered orders |
-| delivery_days | Number of days between purchase and actual delivery |
-| delay_days | Difference in days between estimated and actual delivery |
-| is_late | Whether actual delivery date exceeded estimated delivery date |
-| is_delivered | Whether order status is delivered |
-
-### Business rules
-
-- Grain is one row per order.
-- GMV is calculated only for delivered orders.
-- GMV = item value + freight value for delivered orders.
-- Orders without items are retained and have zero GMV.
-- `is_delivered` should be used when filtering delivered orders.
-- `is_late` can be NULL when delivery information is unavailable.
-- Delivery performance calculations should exclude NULL `is_late` values from their denominator.
+Business rules:
+- GMV is delivered order item value plus freight.
+- Use fact_orders for order-level analysis.
+- Use customer_metrics for customer-level analysis.
+- Use customer_unique_id for customer analysis.
+- Use category_metrics for category analysis.
+- Use monthly_kpis for monthly analysis.
+- Only delivered orders contribute to GMV.
+- AOV is delivered GMV divided by delivered order count.
+- NULL is_late values must not be included in late-rate denominators.
 - Monetary values are in Brazilian reais (R$).
-- `items_value` excludes freight.
-- `gmv` includes freight.
-- Do not join raw order items, payments or reviews directly without aggregating them first.
+- Aggregate before joining tables if joins could cause fan-out.
+- Monthly GMV is grouped by order_purchase_timestamp (purchase month), NOT order_delivered_customer_date (delivery month).
+- For questions asking monthly or yearly GMV, use monthly_kpis.gmv and filter using monthly_kpis.month.
+- Do not calculate monthly GMV by grouping fact_orders using delivery dates.
+- monthly_kpis.gmv represents delivered GMV for orders placed during that month.
+- For order-level delivered GMV analysis, use fact_orders and filter is_delivered = TRUE.
+- Select only the columns explicitly requested or necessary to answer the question.
+- Do not return additional columns just because they are available in the table.
+- monthly_kpis.month is a DATE or TIMESTAMP column, not a string.
+- For extracting calendar years from monthly_kpis.month, use EXTRACT(YEAR FROM month).
+- Do not use SUBSTRING or string functions on date/timestamp columns.
+- Use column names exactly as documented in the schema.
+- Never invent, modify, or duplicate column-name prefixes.
+- Before returning SQL, verify that every referenced column exists in the documented schema.
+
+- Customer identity:
+- fact_orders.customer_id is an order-level customer identifier, NOT a person-level identifier.
+- customer_metrics.customer_unique_id identifies individual people.
+- Never use COUNT(DISTINCT fact_orders.customer_id) as the distinct customer/person count.
+- For questions comparing total orders with distinct people, calculate total orders from fact_orders and distinct people from customer_metrics independently.
+- Do not join fact_orders.customer_id directly to customer_metrics.customer_unique_id.
+
+Conditional aggregation:
+- When a question asks for the contribution of a specific subset, apply that subset's condition to every relevant aggregate, not just the count.
+- For GMV contribution from orders without items, use n_items = 0 AND is_delivered = TRUE inside the SUM condition.
+
+NULL handling:
+- Do not exclude NULL values unless the user explicitly requests their exclusion.
+- When grouping by a column, retain NULL as a separate group unless the question specifies otherwise.
+
+SQL rules:
+- Generate only read-only SQL.
+- Only use the documented tables and columns.
+- Do not use SELECT *.
+- Do not generate INSERT, UPDATE, DELETE, DROP, ALTER, CREATE or other modifying SQL.
+- Return only SQL, without Markdown fences or explanations.
+- Generate only one SQL statement.
+- For rate or percentage questions, multiply the proportion by 100 and ROUND to 2 decimal places.
+- Label percentage results clearly, preferably with a column name ending in _pct.
 
----
-
-## 2. customer_metrics
-
-### Grain
-One row per unique customer (`customer_unique_id`).
-
-### Columns
-
-| Column | Meaning |
-|---|---|
-| customer_unique_id | Unique identifier representing the actual customer |
-| first_order_date | Timestamp of the customer's first order |
-| last_order_date | Timestamp of the customer's latest order |
-| order_count | Total number of orders, including canceled orders |
-| non_canceled_order_count | Number of orders excluding canceled orders |
-| delivered_order_count | Number of delivered orders |
-| lifetime_gmv | Total delivered GMV generated by the customer |
-| aov | Average GMV per delivered order |
-| is_repeat | Whether customer placed more than one order |
-| is_repeat_non_canceled | Whether customer placed more than one non-canceled order |
-| days_to_second_order | Number of days between first and second order |
-| most_recent_state | State associated with the customer's most recent order |
-
-### Business rules
-
-- Grain is one row per `customer_unique_id`.
-- `customer_id` is associated with an order-level customer record.
-- `customer_unique_id` represents the actual customer across orders.
-- `order_count` includes all order statuses.
-- `non_canceled_order_count` excludes canceled orders.
-- `delivered_order_count` counts delivered orders only.
-- `lifetime_gmv` is the sum of delivered GMV.
-- Customer AOV = lifetime GMV / delivered order count.
-- AOV is NULL when a customer has zero delivered orders.
-- `is_repeat` is based on more than one total order.
-- `is_repeat_non_canceled` is based on more than one non-canceled order.
-- `days_to_second_order` is calculated from the first order date to the second order date.
-- Customers must be identified using `customer_unique_id` when measuring repeat purchasing behavior.
-
----
-
-## 3. category_metrics
-
-### Grain
-One row per product category.
-
-### Columns
-
-| Column | Meaning |
-|---|---|
-| product_category_name | Product category |
-| items_sold | Number of delivered items sold |
-| sales | Total delivered item sales excluding freight |
-| average_price | Average item price |
-| freight_share | Freight value divided by item sales |
-| average_review_score | Average review score associated with category orders |
-| late_delivery_rate | Proportion of valid delivery records that were late |
-| number_of_sellers | Number of distinct sellers selling products in the category |
-
-### Business rules
-
-- Grain is one row per product category.
-- Category sales include delivered orders only.
-- `sales` is calculated using item price and excludes freight.
-- `average_price` is the average item price.
-- `freight_share` = total freight value / total item sales.
-- `freight_share` is NULL when total sales are zero.
-- `average_review_score` is calculated from the review scores associated with category orders.
-- `late_delivery_rate` = number of late item records / number of item records with a valid `is_late` value.
-- Late delivery calculations exclude NULL `is_late` values.
-- Category late delivery rate is calculated at the item-record level, not the unique-order level.
-- `number_of_sellers` counts distinct sellers within each category.
-- Missing product categories are represented as `unknown`.
-
----
-
-## 4. monthly_kpis
-
-### Grain
-One row per calendar month.
-
-### Columns
-
-| Column | Meaning |
-|---|---|
-| month | Calendar month |
-| orders | Total orders placed during the month |
-| low_volume | Whether monthly orders are below 100 |
-| delivered_orders | Number of delivered orders |
-| gmv | Delivered GMV |
-| aov | Average delivered order GMV |
-| new_customers | Customers whose first order occurred in that month |
-| returning_customer_orders | Orders placed in a month after the customer's first-order month |
-| cancellation_rate | Proportion of orders canceled |
-| late_rate | Proportion of valid delivery records that were late |
-| average_review_score | Average review score for orders in the month |
-| previous_month_gmv | GMV from the previous calendar month |
-| mom_gmv_growth_pct | Month-over-month GMV growth percentage |
-| is_partial_month | Whether the month is identified as a partial dataset month |
-
-### Business rules
-
-- Grain is one row per calendar month.
-- The calendar contains 26 months from September 2016 through October 2018.
-- Months with no orders are retained.
-- `orders` counts all orders placed during the month.
-- `low_volume` is TRUE when monthly orders are fewer than 100.
-- `delivered_orders` counts delivered orders.
-- Monthly GMV includes delivered orders only.
-- Monthly AOV = monthly GMV / delivered orders.
-- AOV is zero when no delivered orders exist in the month.
-- `new_customers` counts distinct customers whose first order occurred during that month.
-- `returning_customer_orders` counts orders placed after the customer's first-order month.
-- Returning customer orders are not necessarily restricted to delivered orders.
-- `cancellation_rate` = canceled orders / total orders in the month.
-- `late_rate` = late orders / orders with a valid `is_late` value.
-- `average_review_score` is the average review score associated with orders in the month.
-- `previous_month_gmv` uses the previous calendar month's GMV.
-- Missing months are retained and their GMV is treated as zero.
-- `mom_gmv_growth_pct` = ((current month GMV - previous month GMV) / previous month GMV) * 100.
-- Month-over-month growth is NULL when previous month GMV is zero.
-- September 2016 and October 2018 are marked as partial months.
-- Currency is Brazilian reais (R$).
-
----
-
-## 5. Important metric definitions
-
-### GMV
-
-GMV is the total item price plus freight for delivered orders.
-
-```sql
-SUM(gmv)
-```
-
-Use `fact_orders` or `monthly_kpis` when calculating GMV.
-
-### Delivered GMV
-
-GMV only from orders whose status is delivered.
-
-The `gmv` column in `fact_orders` already applies this business rule.
-
-### Repeat customer rate
-
-A repeat customer is a customer who placed more than one order.
-
-Using `customer_metrics`:
-
-- `is_repeat` includes all order statuses.
-- `is_repeat_non_canceled` excludes canceled orders.
-
-### Late delivery rate
-
-Late delivery rate is calculated only for orders with valid delivery comparison data.
-
-Do not include NULL values of `is_late` in the denominator.
-
-### AOV
-
-Average order value is calculated using delivered GMV and delivered order count.
-
-Do not divide GMV by all orders when calculating delivered AOV.
-
-### Freight share
-
-Freight share measures freight cost relative to item sales.
-
-Category-level freight share:
-
-Total freight value / Total item sales
-
----
-
-## 6. SQL safety and query rules
-
-The AI analyst must follow these rules when generating SQL:
-
-1. Use only the analytics tables documented in this file.
-2. Do not query raw tables unless explicitly permitted.
-3. Do not use `SELECT *` in generated analytical queries.
-4. Do not modify, delete or insert data.
-5. Only generate read-only SELECT queries.
-6. Avoid unnecessary joins.
-7. Aggregate data before joining tables when joins could cause fan-out.
-8. Use the correct grain for the metric.
-9. Use `customer_unique_id` for customer-level analysis.
-10. Use `fact_orders` for order-level analysis.
-11. Use `category_metrics` for category-level analysis.
-12. Use `monthly_kpis` for monthly KPI analysis.
-13. Avoid double counting payments, items or reviews.
-14. Do not treat canceled orders as delivered sales.
-15. Explain the metric and assumptions used in the answer.
-
----
-
-## 7. Verified question-SQL examples
-
-### Example 1: What is the total delivered GMV?
-
-```python
-con.sql("""
-    SELECT
-        ROUND(SUM(gmv), 2) AS total_gmv
-    FROM fact_orders
-""").df()
-```
-
-### Example 2: What is the monthly GMV trend?
-
-```python
-con.sql("""
-    SELECT
-        month,
-        gmv
-    FROM monthly_kpis
-    ORDER BY month
-""").df()
-```
-
-### Example 3: Which categories generate the highest sales?
-
-```python
-con.sql("""
-    SELECT
-        product_category_name,
-        sales
-    FROM category_metrics
-    ORDER BY sales DESC
-    LIMIT 10
-""").df()
-```
-
-### Example 4: What is the repeat customer rate?
-
-```python
-con.sql("""
-    SELECT
-        COUNT(*) FILTER (
-            WHERE is_repeat = TRUE
-        ) * 100.0 / COUNT(*) AS repeat_customer_rate
-    FROM customer_metrics
-""").df()
-```
-
-### Example 5: What is the average delivery time for delivered orders?
-
-```python
-con.sql("""
-    SELECT
-        ROUND(AVG(delivery_days), 2) AS average_delivery_days
-    FROM fact_orders
-    WHERE is_delivered = TRUE
-      AND delivery_days IS NOT NULL
-""").df()
-```
-
-### Example 6: What percentage of delivered orders were late?
-
-```python
-con.sql("""
-    SELECT
-        COUNT(*) FILTER (
-            WHERE is_late = TRUE
-        ) * 100.0 / COUNT(is_late) AS late_delivery_rate
-    FROM fact_orders
-    WHERE is_delivered = TRUE
-""").df()
-```
-
-### Example 7: Which states have the highest late delivery rate?
-
-```python
-con.sql("""
-    SELECT
-        customer_state,
-        COUNT(*) FILTER (
-            WHERE is_late = TRUE
-        ) * 100.0 / COUNT(is_late) AS late_delivery_rate,
-        COUNT(is_late) AS valid_delivery_records
-    FROM fact_orders
-    WHERE is_delivered = TRUE
-    GROUP BY customer_state
-    ORDER BY late_delivery_rate DESC
-""").df()
-```
-
-### Example 8: What is the month-over-month GMV growth?
-
-```python
-con.sql("""
-    SELECT
-        month,
-        gmv,
-        previous_month_gmv,
-        mom_gmv_growth_pct
-    FROM monthly_kpis
-    ORDER BY month
-""").df()
-```
-
----
-
-## 8. Limitations
-
-- This dataset represents historical Brazilian e-commerce transactions.
-- The dataset is observational, not experimental.
-- Correlation between delivery performance and reviews does not establish causation.
-- Customer repeat purchasing behavior is based on observed dataset history.
-- The dataset does not necessarily represent current real-world business performance.
-- Partial dataset months should be considered when interpreting monthly trends.
-- Missing delivery dates may affect delivery performance calculations.
-- Category delivery rates are item-record-level metrics.
-- Analytics should be interpreted using the documented metric definitions and data-quality checks.

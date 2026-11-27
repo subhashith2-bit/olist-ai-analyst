@@ -5,19 +5,30 @@ import re
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-CACHE_DB = PROJECT_ROOT / "llm_runs.duckdb"
 
-SCHEMA_VERSION = "v1"
+CACHE_DB = PROJECT_ROOT / "llm_runs.duckdb"
+SCHEMA_FILE = PROJECT_ROOT / "docs" / "schema_for_llm.md"
+
+PROMPT_VERSION = "v1"
 
 
 def normalize_question(question):
     return re.sub(r"\s+", " ", question.strip().lower())
 
 
+def get_schema_hash():
+    schema_content = SCHEMA_FILE.read_bytes()
+    return hashlib.sha256(schema_content).hexdigest()
+
+
 def make_cache_key(question, model):
+    schema_hash = get_schema_hash()
+
     raw_key = (
         f"{normalize_question(question)}|"
-        f"{model}|{SCHEMA_VERSION}"
+        f"{model}|"
+        f"{schema_hash}|"
+        f"{PROMPT_VERSION}"
     )
 
     return hashlib.sha256(raw_key.encode()).hexdigest()

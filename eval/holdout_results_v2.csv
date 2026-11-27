@@ -1,0 +1,50 @@
+﻿id,type,question,outcome,seconds,model,prompt_version,schema_hash,generated_sql,behavior_response,rows_returned,details
+E05,easy_lookup,How many distinct people are represented in the customer-level dataset?,CORRECT,2.008,gemini-2.5-flash,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,SELECT COUNT(DISTINCT customer_unique_id) FROM customer_metrics;,,1,values match
+E06,easy_lookup,Which five product categories had the highest sales? Break ties by category name alphabetically.,CORRECT,1.66,gemini-2.5-flash,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,"SELECT
+  product_category_name,
+  sales
+FROM category_metrics
+ORDER BY
+  sales DESC,
+  product_category_name ASC
+LIMIT 5;",,5,values match
+M04,medium,"For each customer state, calculate the average delivery time in days for delivered orders. Round the displayed average to 2 decimal places. Sort by the rounded average in descending order, then alphabetically by state.",CORRECT,2.171,gemini-2.5-flash,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,"SELECT
+  customer_state,
+  ROUND(AVG(delivery_days), 2) AS average_delivery_time_days
+FROM fact_orders
+WHERE
+  is_delivered = TRUE
+GROUP BY
+  customer_state
+ORDER BY
+  average_delivery_time_days DESC,
+  customer_state;",,27,values match
+M06,medium,"For each product category, show the total sales value in Brazilian reais (R$) and the number of sellers. Sort by total sales value descending, then category name alphabetically.",CORRECT,1.414,gemini-3.5-flash-lite,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,"SELECT
+    product_category_name,
+    sales,
+    number_of_sellers
+FROM
+    category_metrics
+ORDER BY
+    sales DESC,
+    product_category_name ASC;",,74,values match
+D04,definition_based,What is the total delivered GMV? State which order components are included and which order statuses contribute.,CORRECT,2.353,gemini-2.5-flash,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,"SELECT SUM(gmv)
+FROM fact_orders
+WHERE is_delivered = TRUE;",,1,values match
+D05,definition_based,What percentage of category sales is freight value for each product category?,CORRECT,1.458,gemini-3.5-flash-lite,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,"SELECT
+    product_category_name,
+    ROUND(freight_share * 100, 2) AS freight_share_pct
+FROM
+    category_metrics",,74,values match
+T03,date_logic,"For each month in 2017, show the average review score based on orders purchased during that calendar month.",CORRECT,1.704,gemini-2.5-flash,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,"SELECT
+  month,
+  average_review_score
+FROM monthly_kpis
+WHERE
+  EXTRACT(YEAR FROM month) = 2017;",,12,values match
+R02,trap,Compare delivered GMV with the total amount recorded in order payments. Report both amounts and explain why they are different measures.,CORRECT,3.158,gemini-3.5-flash-lite,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,"SELECT 
+    SUM(CASE WHEN is_delivered THEN gmv ELSE 0 END) AS delivered_gmv,
+    SUM(payment_total) AS total_payment_amount
+FROM fact_orders",,1,values match
+A03,ambiguous,Show recent customer activity.,MANUAL_REVIEW,1.555,gemini-3.5-flash-lite,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,,,,Grade manually using the question bank's manual_grade_notes.
+O02,out_of_scope,How much seller commission did the platform earn from each seller?,MANUAL_REVIEW,0.921,gemini-3.5-flash-lite,v1,50145341a9d96c2bad8b02d46569f45430a7155d85a09c3e2c533f6e0d3f7c2f,,,,Grade manually using the question bank's manual_grade_notes.

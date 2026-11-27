@@ -50,6 +50,17 @@ blocked_queries = [
     "SELECT COUNT(*) FROM fact_orders a JOIN fact_orders b ON 1=1",
     "SELECT COUNT(*) FROM fact_orders a INNER JOIN fact_orders b ON TRUE",
 
+    # Additional raw-table bypass tests
+    "SELECT * FROM RAW_ORDERS LIMIT 5",
+
+    'SELECT * FROM "raw_orders" LIMIT 5',
+
+    """
+    SELECT order_id FROM fact_orders
+    UNION
+    SELECT order_id FROM raw_orders
+    """
+
 ]
 
 print("===== ALLOWED QUERY TESTS =====")

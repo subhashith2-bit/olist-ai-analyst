@@ -1,0 +1,82 @@
+﻿id,type,question,outcome,seconds,model,prompt_version,schema_hash,generated_sql,behavior_response,rows_returned,details
+E01,easy_lookup,How many orders are in the dataset?,CORRECT,1.766,gemini-3.5-flash-lite,v1,ac6d60870f1c3121c917aead458da0b62be328c0690892e35e2bc053a0c24c0a,SELECT COUNT(order_id) FROM fact_orders,,1,values match
+E02,easy_lookup,How many delivered orders are there?,CORRECT,1.576,gemini-3.5-flash-lite,v1,ac6d60870f1c3121c917aead458da0b62be328c0690892e35e2bc053a0c24c0a,"SELECT SUM(delivered_orders) AS delivered_orders_count
+FROM monthly_kpis",,1,values match
+E03,easy_lookup,What is the total delivered GMV? Report the amount in Brazilian reais.,CORRECT,4.241,gemini-3.5-flash-lite,v1,ac6d60870f1c3121c917aead458da0b62be328c0690892e35e2bc053a0c24c0a,"SELECT SUM(gmv) AS total_delivered_gmv
+FROM monthly_kpis",,1,values match
+E04,easy_lookup,What was the delivered GMV in January 2018? Report the amount in Brazilian reais.,CORRECT,2.616,gemini-3.5-flash-lite,v1,ac6d60870f1c3121c917aead458da0b62be328c0690892e35e2bc053a0c24c0a,"SELECT gmv
+FROM monthly_kpis
+WHERE month = DATE '2018-01-01'",,1,values match
+M01,medium,Which ten customer states had the highest number of delivered orders? Break ties alphabetically by state.,CORRECT,1.39,gemini-3.5-flash-lite,v1,ac6d60870f1c3121c917aead458da0b62be328c0690892e35e2bc053a0c24c0a,"SELECT 
+    customer_state, 
+    COUNT(*) AS delivered_orders_count
+FROM fact_orders
+WHERE is_delivered = TRUE
+GROUP BY customer_state
+ORDER BY delivered_orders_count DESC, customer_state ASC
+LIMIT 10",,10,values match
+M02,medium,What were the ten product categories with the highest freight share? Break ties alphabetically by category name.,CORRECT,1.592,gemini-3.5-flash-lite,v1,ac6d60870f1c3121c917aead458da0b62be328c0690892e35e2bc053a0c24c0a,"SELECT
+  product_category_name,
+  freight_share
+FROM category_metrics
+ORDER BY freight_share DESC, product_category_name ASC
+LIMIT 10",,10,values match
+M03,medium,"For each payment type, how many orders used it? Sort from highest count to lowest, then alphabetically.",CORRECT,2.082,gemini-3.5-flash-lite,v1,ac6d60870f1c3121c917aead458da0b62be328c0690892e35e2bc053a0c24c0a,"SELECT 
+    main_payment_type,
+    COUNT(order_id) AS order_count
+FROM fact_orders
+GROUP BY main_payment_type
+ORDER BY order_count DESC, main_payment_type ASC;",,5,values match
+M05,medium,Which ten customers had the highest lifetime GMV? Break ties by customer_unique_id.,CORRECT,1.306,gemini-3.5-flash-lite,v1,ac6d60870f1c3121c917aead458da0b62be328c0690892e35e2bc053a0c24c0a,"SELECT customer_unique_id, lifetime_gmv
+FROM customer_metrics
+ORDER BY lifetime_gmv DESC, customer_unique_id ASC
+LIMIT 10",,10,values match
+D01,definition_based,What percentage of customers are repeat customers? State the customer population and repeat-customer definition used.,CORRECT,1.414,gemini-3.5-flash-lite,v1,ac6d60870f1c3121c917aead458da0b62be328c0690892e35e2bc053a0c24c0a,"SELECT 
+    COUNT(CASE WHEN is_repeat = TRUE THEN 1 END) AS repeat_customer_count,
+    COUNT(*) AS total_customer_count,
+    ROUND(COUNT(CASE WHEN is_repeat = TRUE THEN 1 END) * 100.0 / COUNT(*), 2) AS repeat_customer_pct
+FROM customer_metrics",,1,values match
+D02,definition_based,What percentage of orders were delivered late? Exclude orders whose late status is unknown from the denominator.,CORRECT,1.608,gemini-3.5-flash-lite,v1,ac6d60870f1c3121c917aead458da0b62be328c0690892e35e2bc053a0c24c0a,"SELECT 
+    ROUND(AVG(CAST(is_late AS INT)) * 100, 2) AS late_rate_pct
+FROM fact_orders
+WHERE is_late IS NOT NULL",,1,values match
+D03,definition_based,What is the average order value (AOV) for delivered orders? State the numerator and denominator used.,CORRECT,2.07,gemini-3.5-flash-lite,v1,ac6d60870f1c3121c917aead458da0b62be328c0690892e35e2bc053a0c24c0a,"SELECT 
+    SUM(gmv) AS gmv_numerator,
+    COUNT(order_id) AS delivered_order_count_denominator,
+    AVG(gmv) AS aov
+FROM fact_orders
+WHERE is_delivered = TRUE",,1,values match
+T01,date_logic,"Show monthly delivered GMV for calendar year 2017, with one row per month in chronological order.",CORRECT,1.76,gemini-3.5-flash-lite,v1,ac6d60870f1c3121c917aead458da0b62be328c0690892e35e2bc053a0c24c0a,"SELECT 
+    month,
+    gmv
+FROM monthly_kpis
+WHERE EXTRACT(YEAR FROM month) = 2017
+ORDER BY month ASC",,12,values match
+T02,date_logic,Compare delivered GMV by calendar year for 2017 and 2018. Include only the available months in the dataset and label the periods clearly.,CORRECT,1.825,gemini-3.5-flash-lite,v1,ac6d60870f1c3121c917aead458da0b62be328c0690892e35e2bc053a0c24c0a,"SELECT
+    EXTRACT(YEAR FROM month) AS calendar_year,
+    SUM(gmv) AS delivered_gmv
+FROM monthly_kpis
+WHERE EXTRACT(YEAR FROM month) IN (2017, 2018)
+GROUP BY EXTRACT(YEAR FROM month)
+ORDER BY calendar_year",,2,values match
+T04,date_logic,Identify the partial calendar months in the dataset and show each month's order count and delivered GMV.,EXECUTION_ERROR,1.484,gemini-3.5-flash-lite,v1,ac6d60870f1c3121c917aead458da0b62be328c0690892e35e2bc053a0c24c0a,"SELECT 
+    month,
+    orders,
+    gmv
+FROM monthly_kpis
+WHERE is_is_partial_month = TRUE OR is_partial_month = TRUE",,,"BinderException: Binder Error: Referenced column ""is_is_partial_month"" not found in FROM clause!
+Candidate bindings: ""is_partial_month"", ""previous_month_gmv"", ""cancellation_rate"", ""mom_gmv_growth_pct"", ""returning_customer_orders""
+
+LINE 6: WHERE is_is_partial_month = TRUE OR is_partial_month = TRUE
+              ^^^^^^^^^^^^^^^^^^^"
+R01,trap,"How many individual order records are there, and how many distinct people placed those orders? Explain why the two counts can differ.",CORRECT,1.547,gemini-3.5-flash-lite,v1,ac6d60870f1c3121c917aead458da0b62be328c0690892e35e2bc053a0c24c0a,"SELECT 
+    (SELECT COUNT(*) FROM fact_orders) AS total_orders,
+    (SELECT COUNT(customer_unique_id) FROM customer_metrics) AS distinct_people",,1,values match
+R03,trap,"How many orders have no matching order-item records, and what is their contribution to delivered GMV?",CORRECT,2.514,gemini-3.5-flash-lite,v1,ac6d60870f1c3121c917aead458da0b62be328c0690892e35e2bc053a0c24c0a,"SELECT 
+    COUNT(CASE WHEN n_items = 0 THEN 1 END) AS orders_without_items_count,
+    ROUND(SUM(CASE WHEN n_items = 0 AND is_delivered = TRUE THEN gmv ELSE 0 END), 2) AS delivered_gmv_contribution
+FROM fact_orders",,1,values match
+A01,ambiguous,What was the business's revenue?,MANUAL_REVIEW,1.986,gemini-3.5-flash-lite,v1,ac6d60870f1c3121c917aead458da0b62be328c0690892e35e2bc053a0c24c0a,,"Assuming ""revenue"" refers to the total Gross Merchandise Value (GMV) across all delivered orders in the business's history, the total delivered GMV is the sum of the `gmv` column in the `monthly_kpis` table.",,Grade manually using the question bank's manual_grade_notes.
+A02,ambiguous,Who were the best customers?,MANUAL_REVIEW,1.518,gemini-3.5-flash-lite,v1,ac6d60870f1c3121c917aead458da0b62be328c0690892e35e2bc053a0c24c0a,,"To provide a precise answer, I assume ""best customers"" are defined as the top 10 customers ranked by their total lifetime GMV (`lifetime_gmv`) in the `customer_metrics` table. Would you like to use a different metric, such as order count or repeat purchase status, to define the best customers?",,Grade manually using the question bank's manual_grade_notes.
+O01,out_of_scope,What was the net profit margin for each product category?,API_ERROR,0.452,gemini-2.5-flash,v1,ac6d60870f1c3121c917aead458da0b62be328c0690892e35e2bc053a0c24c0a,,,,"ClientError: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 15, model: gemini-3.5-flash-lite, description: Generate content requests per minute limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 45.307566359s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://aistudio.google.com/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'description': 'Generate content requests per minute limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.', 'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'model': 'gemini-3.5-flash-lite', 'location': 'global'}, 'quotaValue': '15'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '45s'}]}}"
+O03,out_of_scope,What is the average age of customers in each state?,API_ERROR,0.422,gemini-2.5-flash,v1,ac6d60870f1c3121c917aead458da0b62be328c0690892e35e2bc053a0c24c0a,,,,"ClientError: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://aistudio.google.com/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 15, model: gemini-3.5-flash-lite, description: Generate content requests per minute limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.\nPlease retry in 44.881094474s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://aistudio.google.com/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'description': 'Generate content requests per minute limit exceeded on Free Tier. See https://aistudio.google.com/docs/rate-limits.', 'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-3.5-flash-lite'}, 'quotaValue': '15'}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '44s'}]}}"
