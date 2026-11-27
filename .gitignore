@@ -6,3 +6,17 @@ data/raw/*
 *.duckdb
 .env
 __pycache__/
+# Python
+__pycache__/
+*.py[cod]
+
+# IDE settings
+.vscode/
+
+# Temporary DuckDB files
+*.duckdb.tmp/
+
+# Debug outputs
+output.txt
+*_diff.txt
+day9_test_output.txt
